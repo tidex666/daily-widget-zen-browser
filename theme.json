@@ -1,0 +1,17 @@
+{
+  "id": "dailyWidget",
+  "name": "Daily Widget",
+  "description": "Daily checklist with per-day reset, optional counters, timers and weekdays in the Zen sidebar.",
+  "author": "tidex",
+  "version": "1.0.0",
+  "scripts": {
+    "daily-widget.uc.js": {
+      "name": "Core script",
+      "description": "Widget + daily tasks, timers and settings.",
+      "include": ["chrome://browser/content/browser.xhtml"]
+    }
+  },
+  "tags": [],
+  "createdAt": "2026-11-11",
+  "updatedAt": "2026-11-11"
+}
