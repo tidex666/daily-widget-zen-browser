@@ -7,6 +7,26 @@
 // NOTE: keep this file pure ASCII. The loader reads it as Latin-1, so any
 // raw UTF-8 symbol shows up as garbage. Use \uXXXX escapes in strings.
 //
+// v1.2.0
+//  - "Optional" tag: open a task in edit mode and tick "Optional". The row
+//    gets a small "optional" tag and is left out of the progress counter
+//    (3/5) and of the "all done" state. It still ticks, hides and resets like
+//    any other task.
+//  - Subtasks (one level): open a task in edit mode and type into "Add
+//    subtask". Subtasks are indented under their parent.
+//      * tick the parent -> all its subtasks get ticked; untick it -> all
+//        subtasks are unticked
+//      * tick every subtask -> the parent ticks itself (optional subtasks
+//        are not required for that)
+//      * the parent shows how many subtasks are done ("1/2"); it has no
+//        times-per-day / timer of its own, and subtasks follow the parent's
+//        weekdays. Deleting a parent deletes its subtasks.
+//      * "Make subtask" nests a task under the one above it, "Make
+//        top-level" takes a subtask out again.
+//      * drag reorders subtasks among their siblings, and a parent moves
+//        together with its subtasks.
+//  - The dragged task now has a transparent (faint glass) background instead
+//    of the dark one.
 // v1.1.0
 //  - Drag to reorder: press a task and drag it up or down (main list and edit
 //    list). The new order is saved. In the main list, which only shows today's
@@ -45,7 +65,7 @@
 (() => {
   "use strict";
 
-  const DAILY_WIDGET_VERSION = "1.1.0";
+  const DAILY_WIDGET_VERSION = "1.2.0";
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const DAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
@@ -103,7 +123,8 @@
     function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
     // =================== DATA ===================
-    // items:  [{ id, text, times, minutes, days }]   days = [] means every day
+    // items:  [{ id, text, times, minutes, days, optional, parent }]   days = [] means every day;
+    //         parent = id of the task this is a subtask of ("" = top-level)
     // state:  { date: "YYYY-MM-DD", counts: { id: n } }   resets every day
     // timers: { id: { end: epochMs } (running) | { left: ms } (paused) }
     let items = [];
@@ -136,10 +157,18 @@
               times: clampInt(x.times, 1, 99, 1),
               minutes: clampInt(x.minutes, 0, 600, 0),
               days,
+              optional: x.optional === true,
+              parent: typeof x.parent === "string" ? x.parent : "",
             });
           }
         }
       } catch (e) {}
+      // a subtask needs an existing top-level task as its parent (one level only)
+      for (const it of out) {
+        if (!it.parent) continue;
+        const p = out.find((q) => q.id === it.parent);
+        if (!p || p === it || p.parent) it.parent = "";
+      }
       items = out;
     }
     function loadState() {
@@ -194,7 +223,23 @@
     }
     function isScheduled(it, wd) { return !it.days.length || it.days.indexOf(wd) !== -1; }
     function countOf(it) { return state.counts[it.id] || 0; }
-    function isDone(it) { return countOf(it) >= it.times; }
+    function ownDone(it) { return countOf(it) >= it.times; }
+    function parentOf(it) { return it.parent ? items.find((x) => x.id === it.parent) || null : null; }
+    function subsOf(it) { return it.parent ? [] : items.filter((x) => x.parent === it.id); }
+    // A subtask follows its parent's weekdays.
+    function scheduledToday(it, wd) { return isScheduled(parentOf(it) || it, wd); }
+    // The subtasks that decide when a parent is done: the required ones
+    // (optional ones are ignored, unless every subtask is optional).
+    function requiredSubs(it) {
+      const subs = subsOf(it);
+      const req = subs.filter((s) => !s.optional);
+      return req.length ? req : subs;
+    }
+    // A parent with subtasks is done when its subtasks are; it has no count of its own.
+    function isDone(it) {
+      const req = requiredSubs(it);
+      return req.length ? req.every(ownDone) : ownDone(it);
+    }
 
     // =================== DOM ===================
     const widgetDiv = document.createElement("div");
@@ -393,8 +438,26 @@
       #daily-widget .dw-sorting > * { transition: transform 0.15s ease; }
       #daily-widget .dw-sorting > .dw-dragging {
         transition: none; position: relative; z-index: 5; cursor: grabbing;
-        border-radius: 10px; background: rgba(36, 36, 40, 0.94);
-        box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+        border-radius: 10px; background: ${COL_SURFACE};
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+      }
+
+      /* ---- subtasks + optional tag ---- */
+      #daily-widget .dw-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      #daily-widget .dw-subs, #daily-widget .dw-esubs {
+        display: flex; flex-direction: column; gap: 2px; min-width: 0;
+        margin: 0 0 2px 12px; padding-left: 6px;
+        border-left: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      #daily-widget .dw-esubs { margin-top: 2px; }
+      #daily-widget .dw-row.dw-sub .dw-row-text { font-size: 11px; }
+      #daily-widget .dw-row.dw-optional .dw-row-text { color: ${COL_TEXT_DIM}; }
+      #daily-widget .dw-row.dw-optional.dw-done .dw-row-text { color: ${COL_TEXT_FAINT}; }
+      #daily-widget .dw-tag {
+        flex-shrink: 0; padding: 1px 6px; border-radius: 7px;
+        font-size: 8.5px; font-weight: 600; letter-spacing: 0.02em;
+        background: ${COL_SURFACE_SOFT}; color: ${COL_TEXT_FAINT};
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
       }
     `;
     widgetDiv.appendChild(styleTag);
@@ -619,9 +682,9 @@
         for (const f of fired) {
           const it = f.it;
           delete timers[it.id];
-          if (isScheduled(it, wd) && !isDone(it)) {
+          if (scheduledToday(it, wd) && !subsOf(it).length && !ownDone(it)) {
             state.counts[it.id] = countOf(it) + 1;
-            if (isDone(it)) markRecent(it.id);
+            if (ownDone(it)) markDone(it);
           }
         }
         saveState();
@@ -669,17 +732,51 @@
         render();
       }, 1100));
     }
+    // `it` has just become done: keep it (and, when that completes its parent,
+    // the whole group) on screen for a moment so a mis-click can be undone.
+    function markDone(it) {
+      markRecent(it.id);
+      const group = it.parent ? parentOf(it) : it;
+      if (group && isDone(group)) {
+        markRecent(group.id);
+        for (const sub of subsOf(group)) markRecent(sub.id);
+      }
+    }
+    // Tick or untick a whole task. A parent with subtasks ticks / unticks all
+    // of its subtasks (its own count is not used).
+    function setDone(it, on) {
+      const kids = subsOf(it);
+      let timersChanged = false;
+      for (const x of (kids.length ? kids : [it])) {
+        if (on) state.counts[x.id] = x.times;
+        else delete state.counts[x.id];
+        if (timers[x.id]) { delete timers[x.id]; timersChanged = true; }
+        if (!on) recent.delete(x.id);
+      }
+      if (kids.length) delete state.counts[it.id];
+      if (!on) recent.delete(it.id);
+      if (timersChanged) saveTimers();
+    }
     function clickItem(it) {
       ensureToday();
-      const c = countOf(it);
-      if (c >= it.times) {
-        delete state.counts[it.id];
-        recent.delete(it.id);
+      if (subsOf(it).length) {
+        if (isDone(it)) {
+          setDone(it, false);
+        } else {
+          setDone(it, true);
+          markDone(it);
+        }
       } else {
-        state.counts[it.id] = c + 1;
-        if (c + 1 >= it.times) {
-          if (timers[it.id]) { delete timers[it.id]; saveTimers(); }
-          markRecent(it.id);
+        const c = countOf(it);
+        if (c >= it.times) {
+          delete state.counts[it.id];
+          recent.delete(it.id);
+        } else {
+          state.counts[it.id] = c + 1;
+          if (c + 1 >= it.times) {
+            if (timers[it.id]) { delete timers[it.id]; saveTimers(); }
+            markDone(it);
+          }
         }
       }
       saveState();
@@ -687,11 +784,17 @@
     }
     function undoItem(it) {
       ensureToday();
-      const c = countOf(it);
-      if (c <= 0) return;
-      if (c <= 1) delete state.counts[it.id];
-      else state.counts[it.id] = c - 1;
-      recent.delete(it.id);
+      const kids = subsOf(it);
+      if (kids.length) {
+        if (!kids.some((k) => countOf(k) > 0)) return;
+        setDone(it, false);
+      } else {
+        const c = countOf(it);
+        if (c <= 0) return;
+        if (c <= 1) delete state.counts[it.id];
+        else state.counts[it.id] = c - 1;
+        recent.delete(it.id);
+      }
       saveState();
       render();
     }
@@ -722,6 +825,8 @@
         if (!row || row.parentNode !== container || !row.dataset.id) return;
         if (t.closest("button, input, textarea")) return;
         if (handleSel && !t.closest(handleSel)) return;
+        // a nested list (subtasks) handles its own rows; the outer list must not also start a drag
+        e.stopPropagation();
 
         const pid = e.pointerId;
         const startY = e.clientY;
@@ -816,39 +921,77 @@
       return btn;
     }
 
+    // "done / total" of a parent's required subtasks
+    function groupProgress(it) {
+      const req = requiredSubs(it);
+      return { done: req.filter(ownDone).length, total: req.length };
+    }
+
     function buildRow(it) {
+      const kids = subsOf(it);
       const done = isDone(it);
-      const row = el("div", "dw-row" + (done ? " dw-done" : ""));
+      const row = el("div", "dw-row" + (done ? " dw-done" : "") + (it.optional ? " dw-optional" : "") + (it.parent ? " dw-sub" : ""));
       row.dataset.id = it.id;
       row.appendChild(checkBox(done));
       row.appendChild(el("span", "dw-row-text", it.text));
-      if (it.times > 1) row.appendChild(el("span", "dw-badge", countOf(it) + "/" + it.times));
-      if (it.minutes > 0 && !done) row.appendChild(buildTimerBtn(it));
-      row.title = it.text + (it.times > 1 ? "\nClick: +1, right-click: -1" : "\nClick to tick, right-click to untick") + "\nDrag to reorder";
+      if (it.optional) row.appendChild(el("span", "dw-tag", "optional"));
+      if (kids.length) {
+        const g = groupProgress(it);
+        row.appendChild(el("span", "dw-badge", g.done + "/" + g.total));
+      } else if (it.times > 1) {
+        row.appendChild(el("span", "dw-badge", countOf(it) + "/" + it.times));
+      }
+      if (!kids.length && it.minutes > 0 && !done) row.appendChild(buildTimerBtn(it));
+      let hint;
+      if (kids.length) hint = "Click: tick / untick all subtasks, right-click: untick all";
+      else if (it.times > 1) hint = "Click: +1, right-click: -1";
+      else hint = "Click to tick, right-click to untick";
+      row.title = it.text + "\n" + hint + "\nDrag to reorder";
       row.addEventListener("click", (e) => { e.stopPropagation(); clickItem(it); });
       row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); undoItem(it); });
       return row;
+    }
+
+    // A top-level task plus its (visible) subtasks, as one block that drags as a whole.
+    function buildGroup(top, subs) {
+      const g = el("div", "dw-group");
+      g.dataset.id = top.id;
+      g.appendChild(buildRow(top));
+      if (subs.length) {
+        const box = el("div", "dw-subs");
+        for (const sub of subs) box.appendChild(buildRow(sub));
+        enableDragSort(box, ".dw-row", null);
+        g.appendChild(box);
+      }
+      return g;
     }
 
     function renderMain() {
       if (dragActive) { pendingRender = true; return; }
       ensureToday();
       const wd = weekday();
-      const today = items.filter((it) => isScheduled(it, wd));
-      const doneN = today.filter(isDone).length;
-      progEl.textContent = today.length ? doneN + "/" + today.length : "";
-      widgetDiv.dataset.complete = today.length && doneN === today.length ? "1" : "";
-      const vis = today.filter((it) => !hideDone || !isDone(it) || recent.has(it.id));
+      const today = items.filter((it) => !it.parent && isScheduled(it, wd));
+      // optional tasks are shown but not counted
+      const counted = today.filter((it) => !it.optional);
+      const doneN = counted.filter(isDone).length;
+      progEl.textContent = counted.length ? doneN + "/" + counted.length : "";
+      widgetDiv.dataset.complete = counted.length && doneN === counted.length ? "1" : "";
+      const groups = [];
+      for (const top of today) {
+        if (hideDone && isDone(top) && !recent.has(top.id)) continue;
+        const subs = subsOf(top).filter((sub) => !hideDone || !isDone(sub) || recent.has(sub.id));
+        groups.push(buildGroup(top, subs));
+      }
       const sc = listEl.scrollTop;
       listEl.textContent = "";
-      if (!vis.length) {
+      if (!groups.length) {
         let msg;
         if (!items.length) msg = "No tasks yet.\nPress the pencil to add some.";
         else if (!today.length) msg = "Nothing planned for today.";
         else msg = "All done for today.";
         listEl.appendChild(el("div", "dw-empty", msg));
       } else {
-        for (const it of vis) listEl.appendChild(buildRow(it));
+        for (const g of groups) listEl.appendChild(g);
       }
       listEl.scrollTop = sc;
       scheduleTimers();
@@ -857,6 +1000,7 @@
     // =================== EDIT MODE ===================
     let expandedId = null;
 
+    // `it` = the top-level task whose weekdays apply
     function nextDayLabel(it, wd) {
       for (let i = 1; i <= 7; i++) {
         const d = (wd + i) % 7;
@@ -866,15 +1010,26 @@
     }
     function metaText(it) {
       const wd = weekday();
+      const subs = subsOf(it);
       const parts = [];
-      if (it.times > 1) parts.push(it.times + "x per day");
-      if (it.minutes > 0) parts.push(fmtMinutes(it.minutes) + " timer");
-      if (it.days.length) parts.push(DAY_ORDER.filter((d) => it.days.indexOf(d) !== -1).map((d) => DAY_NAMES[d]).join(" "));
-      if (!parts.length) parts.push("daily");
+      if (it.optional) parts.push("optional");
+      const base = parts.length;
+      if (subs.length) {
+        parts.push(subs.length + (subs.length === 1 ? " subtask" : " subtasks"));
+      } else {
+        if (it.times > 1) parts.push(it.times + "x per day");
+        if (it.minutes > 0) parts.push(fmtMinutes(it.minutes) + " timer");
+      }
+      if (!it.parent && it.days.length) parts.push(DAY_ORDER.filter((d) => it.days.indexOf(d) !== -1).map((d) => DAY_NAMES[d]).join(" "));
+      if (parts.length === base) parts.push(it.parent ? "subtask" : "daily");
+      const sched = parentOf(it) || it;
       const c = countOf(it);
-      if (!isScheduled(it, wd)) parts.push("not today, back " + nextDayLabel(it, wd));
-      else if (c >= it.times) parts.push("done, back " + nextDayLabel(it, wd));
-      else if (c > 0) parts.push(c + "/" + it.times + " today");
+      if (!scheduledToday(it, wd)) parts.push("not today, back " + nextDayLabel(sched, wd));
+      else if (isDone(it)) parts.push("done, back " + nextDayLabel(sched, wd));
+      else if (subs.length) {
+        const g = groupProgress(it);
+        if (g.done > 0) parts.push(g.done + "/" + g.total + " today");
+      } else if (c > 0) parts.push(c + "/" + it.times + " today");
       return parts.join(" \u00b7 ");
     }
 
@@ -900,20 +1055,29 @@
       return f;
     }
 
+    // Up / down swaps with the neighbouring task of the same level.
     function moveItem(it, dir) {
+      const sibs = items.filter((x) => (x.parent || "") === (it.parent || ""));
+      const k = sibs.indexOf(it) + dir;
+      if (k < 0 || k >= sibs.length) return;
+      const other = sibs[k];
       const i = items.indexOf(it);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= items.length) return;
-      items[i] = items[j];
+      const j = items.indexOf(other);
+      items[i] = other;
       items[j] = it;
       saveItems();
       renderEdit();
       renderMain();
     }
     function deleteItem(it) {
-      items = items.filter((x) => x !== it);
-      delete state.counts[it.id];
-      delete timers[it.id];
+      // deleting a parent deletes its subtasks too
+      const gone = [it].concat(subsOf(it));
+      items = items.filter((x) => gone.indexOf(x) === -1);
+      for (const g of gone) {
+        delete state.counts[g.id];
+        delete timers[g.id];
+        recent.delete(g.id);
+      }
       expandedId = null;
       saveItems();
       saveState();
@@ -922,7 +1086,63 @@
       renderMain();
     }
 
+    // A parent with subtasks has no count or timer of its own.
+    function dropOwnProgress(p) {
+      delete state.counts[p.id];
+      if (timers[p.id]) { delete timers[p.id]; saveTimers(); }
+      recent.delete(p.id);
+      saveState();
+    }
+    // Put `it` right after the last subtask of `p` (or after `p` itself).
+    function placeAfterSubs(it, p) {
+      items.splice(items.indexOf(it), 1);
+      const sibs = subsOf(p).filter((x) => x !== it);
+      const last = sibs.length ? sibs[sibs.length - 1] : p;
+      items.splice(items.indexOf(last) + 1, 0, it);
+    }
+    function addSub(p, text) {
+      text = text.trim();
+      if (!text) return;
+      if (!subsOf(p).length) dropOwnProgress(p);
+      const sub = { id: newId(), text: text.slice(0, 120), times: 1, minutes: 0, days: [], optional: false, parent: p.id };
+      items.push(sub);
+      placeAfterSubs(sub, p);
+      saveItems();
+      renderEdit();
+      renderMain();
+      // stay in the field so several subtasks can be typed in a row
+      const inp = editList.querySelector('input[data-sub-for="' + p.id + '"]');
+      if (inp) inp.focus();
+    }
+    // Nest `it` under the top-level task above it.
+    function nestItem(it) {
+      if (it.parent || subsOf(it).length) return;
+      const tops = items.filter((x) => !x.parent);
+      const k = tops.indexOf(it);
+      if (k <= 0) return;
+      const p = tops[k - 1];
+      if (!subsOf(p).length) dropOwnProgress(p);
+      it.parent = p.id;
+      it.days = [];
+      placeAfterSubs(it, p);
+      saveItems();
+      renderEdit();
+      renderMain();
+    }
+    // Take a subtask out again; it lands right below its former parent.
+    function unnestItem(it) {
+      const p = parentOf(it);
+      if (!p) return;
+      it.parent = "";
+      items.splice(items.indexOf(it), 1);
+      items.splice(items.indexOf(p) + 1, 0, it);
+      saveItems();
+      renderEdit();
+      renderMain();
+    }
+
     function buildEditor(it, onChange) {
+      const hasSubs = subsOf(it).length > 0;
       const box = el("div", "dw-editor");
       box.addEventListener("click", (e) => e.stopPropagation());
 
@@ -944,34 +1164,71 @@
       });
       box.appendChild(nameIn);
 
-      box.appendChild(numField("Times per day", it.times, 1, 99, (v) => {
-        it.times = v;
-        onChange();
-      }));
-      box.appendChild(numField("Timer in minutes (0 = none)", it.minutes, 0, 600, (v) => {
-        it.minutes = v;
-        if (timers[it.id]) { delete timers[it.id]; saveTimers(); }
-        onChange();
-      }));
-
-      const daysField = el("div", "dw-field dw-field-col");
-      daysField.appendChild(el("span", null, "Days (none selected = every day)"));
-      const daysRow = el("div", "dw-days");
-      for (const d of DAY_ORDER) {
-        const b = el("button", "dw-day" + (it.days.indexOf(d) !== -1 ? " dw-on" : ""), DAY_SHORT[d]);
-        b.title = DAY_NAMES[d];
-        b.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const i = it.days.indexOf(d);
-          if (i === -1) it.days.push(d);
-          else it.days.splice(i, 1);
-          b.classList.toggle("dw-on", it.days.indexOf(d) !== -1);
+      // a parent is done when its subtasks are: no count or timer of its own
+      if (!hasSubs) {
+        box.appendChild(numField("Times per day", it.times, 1, 99, (v) => {
+          it.times = v;
           onChange();
-        });
-        daysRow.appendChild(b);
+        }));
+        box.appendChild(numField("Timer in minutes (0 = none)", it.minutes, 0, 600, (v) => {
+          it.minutes = v;
+          if (timers[it.id]) { delete timers[it.id]; saveTimers(); }
+          onChange();
+        }));
       }
-      daysField.appendChild(daysRow);
-      box.appendChild(daysField);
+
+      // subtasks follow the weekdays of their parent
+      if (!it.parent) {
+        const daysField = el("div", "dw-field dw-field-col");
+        daysField.appendChild(el("span", null, "Days (none selected = every day)"));
+        const daysRow = el("div", "dw-days");
+        for (const d of DAY_ORDER) {
+          const b = el("button", "dw-day" + (it.days.indexOf(d) !== -1 ? " dw-on" : ""), DAY_SHORT[d]);
+          b.title = DAY_NAMES[d];
+          b.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const i = it.days.indexOf(d);
+            if (i === -1) it.days.push(d);
+            else it.days.splice(i, 1);
+            b.classList.toggle("dw-on", it.days.indexOf(d) !== -1);
+            onChange();
+          });
+          daysRow.appendChild(b);
+        }
+        daysField.appendChild(daysRow);
+        box.appendChild(daysField);
+      }
+
+      const optRow = el("div", "dw-toggle");
+      const optChk = checkBox(!!it.optional);
+      optRow.appendChild(optChk);
+      optRow.appendChild(el("span", null, "Optional (not counted in progress)"));
+      optRow.addEventListener("click", (e) => {
+        e.stopPropagation();
+        it.optional = !it.optional;
+        optChk.classList.toggle("dw-on", it.optional);
+        onChange();
+      });
+      box.appendChild(optRow);
+
+      if (!it.parent) {
+        const subIn = el("input", "dw-input");
+        subIn.type = "text";
+        subIn.maxLength = 120;
+        subIn.placeholder = "Add subtask, press Enter";
+        subIn.dataset.subFor = it.id;
+        subIn.addEventListener("keydown", (e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            const v = subIn.value;
+            subIn.value = "";
+            addSub(it, v);
+          } else if (e.key === "Escape") {
+            subIn.blur();
+          }
+        });
+        box.appendChild(subIn);
+      }
 
       const acts = el("div", "dw-erow-actions");
       const upBtn = roundBtn(PATH_UP, "Move up", 10, 3);
@@ -981,13 +1238,12 @@
       const untickBtn = el("button", "dw-pill", "Untick today");
       untickBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        delete state.counts[it.id];
-        if (timers[it.id]) { delete timers[it.id]; saveTimers(); }
-        recent.delete(it.id);
+        setDone(it, false);
         saveState();
         onChange();
       });
       const delBtn = el("button", "dw-pill dw-danger", "Delete");
+      if (hasSubs) delBtn.title = "Also deletes its subtasks";
       let armed = null;
       delBtn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1002,6 +1258,16 @@
       acts.appendChild(upBtn);
       acts.appendChild(downBtn);
       acts.appendChild(untickBtn);
+      if (it.parent) {
+        const outBtn = el("button", "dw-pill", "Make top-level");
+        outBtn.addEventListener("click", (e) => { e.stopPropagation(); unnestItem(it); });
+        acts.appendChild(outBtn);
+      } else if (!hasSubs && items.filter((x) => !x.parent).indexOf(it) > 0) {
+        const inBtn = el("button", "dw-pill", "Make subtask");
+        inBtn.title = "Nest under the task above";
+        inBtn.addEventListener("click", (e) => { e.stopPropagation(); nestItem(it); });
+        acts.appendChild(inBtn);
+      }
       acts.appendChild(delBtn);
       box.appendChild(acts);
       return box;
@@ -1031,6 +1297,14 @@
         };
         wrap.appendChild(buildEditor(it, onChange));
       }
+      // subtasks sit right under their parent and drag as part of it
+      const subs = subsOf(it);
+      if (subs.length) {
+        const box = el("div", "dw-esubs");
+        for (const sub of subs) box.appendChild(buildEditRow(sub));
+        enableDragSort(box, ".dw-eitem", ".dw-erow");
+        wrap.appendChild(box);
+      }
       return wrap;
     }
 
@@ -1042,7 +1316,7 @@
       if (!items.length) {
         editList.appendChild(el("div", "dw-empty", "No tasks yet.\nType one below and press Enter."));
       } else {
-        for (const it of items) editList.appendChild(buildEditRow(it));
+        for (const it of items) if (!it.parent) editList.appendChild(buildEditRow(it));
       }
       editList.scrollTop = sc;
       for (const s of syncers) s();
@@ -1051,7 +1325,7 @@
     function addItem(text) {
       text = text.trim();
       if (!text) return;
-      items.push({ id: newId(), text: text.slice(0, 120), times: 1, minutes: 0, days: [] });
+      items.push({ id: newId(), text: text.slice(0, 120), times: 1, minutes: 0, days: [], optional: false, parent: "" });
       saveItems();
       renderEdit();
       renderMain();
@@ -1077,7 +1351,7 @@
 
     // =================== EVENTS ===================
     widgetDiv.addEventListener("click", (e) => e.stopPropagation());
-    enableDragSort(listEl, ".dw-row", null);
+    enableDragSort(listEl, ".dw-group", ".dw-group > .dw-row");
     enableDragSort(editList, ".dw-eitem", ".dw-erow");
     editBtn.addEventListener("click", (e) => { e.stopPropagation(); setEditing(true); });
     backBtn.addEventListener("click", (e) => { e.stopPropagation(); setEditing(false); });
