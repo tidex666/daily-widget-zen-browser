@@ -7,6 +7,18 @@
 // NOTE: keep this file pure ASCII. The loader reads it as Latin-1, so any
 // raw UTF-8 symbol shows up as garbage. Use \uXXXX escapes in strings.
 //
+// v1.1.0
+//  - Drag to reorder: press a task and drag it up or down (main list and edit
+//    list). The new order is saved. In the main list, which only shows today's
+//    open tasks, the task lands next to the one you dropped it on; hidden
+//    tasks keep their place. The up / down buttons in the editor still work.
+//  - No more hover highlight on the whole widget (no tint, no brighter rim).
+//  - Header icons (pencil, gear, back) like the SoundCloud corner buttons:
+//    no fill, faint at rest (40%), full brightness while the widget is hovered,
+//    soft round disc under the pointer. Same icon colour (#f4f4f5) and sizes.
+//  - Styling aligned with the SoundCloud widget: 10px row radius, 2px row gap,
+//    22px pills, rounded settings / editor cards with a hairline inner ring,
+//    press-scale on every button.
 // v1.0.0
 //  - Checklist of your own daily tasks. Tick one and it is "done for today";
 //    ticked tasks disappear (setting) and come back the next day.
@@ -33,7 +45,7 @@
 (() => {
   "use strict";
 
-  const DAILY_WIDGET_VERSION = "1.0.0";
+  const DAILY_WIDGET_VERSION = "1.1.0";
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const DAY_SHORT = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   const DAY_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Monday first
@@ -213,16 +225,7 @@
         background: rgba(255, 255, 255, 0.10);
         mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
         mask-composite: exclude;
-        transition: background-color 0.15s ease;
       }
-      #daily-widget::after {
-        content: ""; position: absolute; inset: 0; border-radius: inherit;
-        z-index: -1; pointer-events: none;
-        background: rgba(255, 255, 255, 0.06);
-        opacity: 0; transition: opacity 0.15s ease;
-      }
-      #daily-widget:hover::after { opacity: 1; }
-      #daily-widget:hover::before { background: rgba(255, 255, 255, 0.20); }
       #daily-widget.dw-ring::before { animation: dw-ring 1s ease-in-out 6; }
       @keyframes dw-ring {
         0%, 100% { background: rgba(255, 255, 255, 0.10); }
@@ -244,30 +247,34 @@
       #daily-widget .dw-spacer { flex: 1; }
       #daily-widget[data-complete="1"] .dw-progress { color: ${COL_TEXT_DIM}; }
 
-      /* round flat buttons */
+      /* round flat buttons (same behaviour as the SoundCloud buttons) */
       #daily-widget .dw-btn {
         appearance: none; border: none; margin: 0; padding: 0;
-        font: inherit; color: inherit; cursor: pointer;
+        font: inherit; color: ${COL_TEXT}; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
         width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
-        background-color: ${COL_SURFACE};
-        transition: background-color 0.12s ease, transform 0.08s ease, opacity 0.15s ease;
+        background-color: ${COL_SURFACE_SOFT};
+        transition: background-color 0.12s ease, transform 0.08s ease, opacity 0.15s ease, color 0.12s ease;
       }
       #daily-widget .dw-btn:hover { background-color: ${COL_SELECTION}; }
-      #daily-widget .dw-btn:active { transform: scale(0.92); }
-      #daily-widget .dw-main .dw-head .dw-btn { opacity: 0.5; }
-      #daily-widget:hover .dw-main .dw-head .dw-btn { opacity: 1; }
+      #daily-widget .dw-btn:active { transform: scale(0.94); }
+      #daily-widget .dw-pill:active, #daily-widget .dw-timer:active, #daily-widget .dw-day:active { transform: scale(0.94); }
+      /* header icons = the SoundCloud "corner" buttons: no fill, faint until the
+         widget is hovered, soft disc under the pointer */
+      #daily-widget .dw-head .dw-btn { opacity: 0.4; background-color: transparent; }
+      #daily-widget:hover .dw-head .dw-btn { opacity: 1; }
+      #daily-widget .dw-head .dw-btn:hover { background-color: ${COL_SURFACE}; }
 
       /* ---- main list ---- */
       #daily-widget .dw-list {
-        display: flex; flex-direction: column; gap: 1px;
+        display: flex; flex-direction: column; gap: 2px;
         max-height: 200px; overflow-y: auto; overflow-x: hidden;
         margin: 0 -4px; padding: 0 4px;
         scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
       }
       #daily-widget .dw-row {
         display: flex; align-items: center; gap: 8px; min-width: 0;
-        padding: 4px 5px; border-radius: 8px; cursor: pointer;
+        padding: 4px 5px; border-radius: 10px; cursor: pointer; user-select: none;
         transition: background-color 0.12s ease;
       }
       #daily-widget .dw-row:hover { background: ${COL_SURFACE}; }
@@ -311,7 +318,8 @@
       #daily-widget .dw-head-edit .dw-title { text-align: center; }
       #daily-widget .dw-settings {
         display: none; flex-direction: column; gap: 3px;
-        padding: 6px 6px 7px; border-radius: 10px; background: ${COL_SURFACE_SOFT};
+        padding: 6px 6px 7px; border-radius: 13px; background: ${COL_SURFACE_SOFT};
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
       }
       #daily-widget.dw-settings-open .dw-settings { display: flex; }
       #daily-widget .dw-toggle {
@@ -321,8 +329,8 @@
       #daily-widget .dw-toggle:hover { background: ${COL_SURFACE}; }
       #daily-widget .dw-pills { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
       #daily-widget .dw-pill {
-        appearance: none; border: none; margin: 0; padding: 0 9px; height: 20px;
-        border-radius: 10px; box-sizing: border-box; cursor: pointer;
+        appearance: none; border: none; margin: 0; padding: 0 10px; height: 22px;
+        border-radius: 11px; box-sizing: border-box; cursor: pointer;
         font: inherit; font-size: 10px; font-weight: 600; white-space: nowrap;
         background: ${COL_SURFACE}; color: ${COL_TEXT_DIM};
         transition: background-color 0.12s ease, color 0.12s ease;
@@ -330,12 +338,12 @@
       #daily-widget .dw-pill:hover { background: ${COL_SELECTION}; color: ${COL_TEXT}; }
 
       #daily-widget .dw-elist {
-        display: flex; flex-direction: column; gap: 1px;
+        display: flex; flex-direction: column; gap: 2px;
         max-height: 250px; overflow-y: auto; overflow-x: hidden;
         margin: 0 -4px; padding: 0 4px;
         scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
       }
-      #daily-widget .dw-erow { padding: 4px 6px; border-radius: 8px; cursor: pointer; min-width: 0; transition: background-color 0.12s ease; }
+      #daily-widget .dw-erow { padding: 4px 6px; border-radius: 10px; cursor: pointer; min-width: 0; user-select: none; transition: background-color 0.12s ease; }
       #daily-widget .dw-erow:hover { background: ${COL_SURFACE}; }
       #daily-widget .dw-eitem.dw-open .dw-erow { background: ${COL_SURFACE}; }
       #daily-widget .dw-erow-name {
@@ -348,7 +356,8 @@
       }
       #daily-widget .dw-editor {
         display: flex; flex-direction: column; gap: 7px;
-        padding: 8px 7px 8px; margin: 2px 0 4px; border-radius: 10px; background: ${COL_SURFACE_SOFT};
+        padding: 8px 7px 8px; margin: 2px 0 4px; border-radius: 13px; background: ${COL_SURFACE_SOFT};
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07);
       }
       #daily-widget .dw-field {
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
@@ -378,6 +387,15 @@
       #daily-widget .dw-erow-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
       #daily-widget .dw-pill.dw-danger:hover { background: rgba(255, 120, 120, 0.35); }
       #daily-widget .dw-add { margin-top: 3px; }
+
+      /* ---- drag to reorder ---- */
+      #daily-widget .dw-sorting { user-select: none; }
+      #daily-widget .dw-sorting > * { transition: transform 0.15s ease; }
+      #daily-widget .dw-sorting > .dw-dragging {
+        transition: none; position: relative; z-index: 5; cursor: grabbing;
+        border-radius: 10px; background: rgba(36, 36, 40, 0.94);
+        box-shadow: 0 8px 18px -8px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+      }
     `;
     widgetDiv.appendChild(styleTag);
 
@@ -428,7 +446,7 @@
     function roundBtn(path, title, size, sw) {
       const b = el("button", "dw-btn");
       b.title = title;
-      b.appendChild(svgIcon(path, size || 10, "currentColor", sw || 2));
+      b.appendChild(svgIcon(path, size || 10, COL_TEXT, sw || 2));
       return b;
     }
 
@@ -436,7 +454,7 @@
     const mainView = el("div", "dw-main");
     const head = el("div", "dw-head");
     const progEl = el("span", "dw-progress");
-    const editBtn = roundBtn(PATH_PENCIL, "Edit tasks", 10, 2);
+    const editBtn = roundBtn(PATH_PENCIL, "Edit tasks", 11, 2.2);
     head.appendChild(el("span", "dw-title", "Today"));
     head.appendChild(progEl);
     head.appendChild(el("span", "dw-spacer"));
@@ -449,7 +467,7 @@
     const editView = el("div", "dw-edit");
     const ehead = el("div", "dw-head dw-head-edit");
     const backBtn = roundBtn(PATH_BACK, "Back", 10, 3);
-    const gearBtn = roundBtn(PATH_GEAR, "Settings", 10, 2);
+    const gearBtn = roundBtn(PATH_GEAR, "Settings", 12, 2);
     ehead.appendChild(backBtn);
     ehead.appendChild(el("span", "dw-title", "Edit daily"));
     ehead.appendChild(gearBtn);
@@ -678,6 +696,112 @@
       render();
     }
 
+    // =================== DRAG TO REORDER ===================
+    // Pointer-based (HTML5 drag and drop is unreliable in the browser chrome).
+    // A press that moves less than 5px is still a normal click.
+    let dragActive = false;
+    let pendingRender = false;
+
+    // Move task `id` next to task `targetId` (before it, or after it).
+    function reorderItems(id, targetId, after) {
+      const from = items.findIndex((x) => x.id === id);
+      if (from < 0 || id === targetId) return false;
+      const moved = items.splice(from, 1)[0];
+      const t = items.findIndex((x) => x.id === targetId);
+      if (t < 0) { items.splice(from, 0, moved); return false; }
+      items.splice(after ? t + 1 : t, 0, moved);
+      return true;
+    }
+
+    function enableDragSort(container, rowSel, handleSel) {
+      container.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || dragActive) return;
+        const t = e.target;
+        if (!t || !t.closest) return;
+        const row = t.closest(rowSel);
+        if (!row || row.parentNode !== container || !row.dataset.id) return;
+        if (t.closest("button, input, textarea")) return;
+        if (handleSel && !t.closest(handleSel)) return;
+
+        const pid = e.pointerId;
+        const startY = e.clientY;
+        let started = false;
+        let rows = [];
+        let rects = [];
+        let from = 0;
+        let to = 0;
+        let shift = 0;
+
+        function onMove(ev) {
+          if (ev.pointerId !== pid) return;
+          const dy = ev.clientY - startY;
+          if (!started) {
+            if (Math.abs(dy) < 5) return;
+            rows = Array.from(container.children).filter((c) => c.matches(rowSel) && c.dataset.id);
+            from = rows.indexOf(row);
+            if (from < 0) { finish(false); return; }
+            started = true;
+            dragActive = true;
+            rects = rows.map((r) => r.getBoundingClientRect());
+            let gap = 0;
+            try { gap = parseFloat(getComputedStyle(container).rowGap) || 0; } catch (e2) {}
+            shift = rects[from].height + gap;
+            to = from;
+            container.classList.add("dw-sorting");
+            row.classList.add("dw-dragging");
+            try { row.setPointerCapture(pid); } catch (e2) {}
+          }
+          const minD = rects[0].top - rects[from].top;
+          const maxD = rects[rects.length - 1].bottom - rects[from].bottom;
+          const d = Math.max(minD, Math.min(maxD, dy));
+          row.style.transform = "translateY(" + d + "px)";
+          const center = rects[from].top + rects[from].height / 2 + d;
+          to = from;
+          for (let j = from + 1; j < rows.length; j++) {
+            if (center > rects[j].top + rects[j].height / 2) to = j;
+          }
+          for (let j = from - 1; j >= 0; j--) {
+            if (center < rects[j].top + rects[j].height / 2) to = j;
+          }
+          rows.forEach((r, j) => {
+            if (j === from) return;
+            let ty = 0;
+            if (from < to && j > from && j <= to) ty = -shift;
+            else if (from > to && j >= to && j < from) ty = shift;
+            r.style.transform = ty ? "translateY(" + ty + "px)" : "";
+          });
+        }
+        function onUp(ev) { if (ev.pointerId === pid) finish(true); }
+        function onCancel(ev) { if (ev.pointerId === pid) finish(false); }
+
+        function finish(commit) {
+          document.removeEventListener("pointermove", onMove);
+          document.removeEventListener("pointerup", onUp);
+          document.removeEventListener("pointercancel", onCancel);
+          if (!started) return;
+          try { row.releasePointerCapture(pid); } catch (e2) {}
+          container.classList.remove("dw-sorting");
+          row.classList.remove("dw-dragging");
+          for (const r of rows) r.style.transform = "";
+          dragActive = false;
+          // the click that follows the release must not tick / open the task
+          const swallow = (ce) => { ce.stopPropagation(); ce.preventDefault(); };
+          container.addEventListener("click", swallow, true);
+          setTimeout(() => container.removeEventListener("click", swallow, true), 60);
+          if (commit && to !== from && rows[to]) {
+            if (reorderItems(row.dataset.id, rows[to].dataset.id, to > from)) saveItems();
+          }
+          pendingRender = false;
+          renderMain();
+          renderEdit();
+        }
+
+        document.addEventListener("pointermove", onMove);
+        document.addEventListener("pointerup", onUp);
+        document.addEventListener("pointercancel", onCancel);
+      });
+    }
+
     // =================== MAIN RENDER ===================
     function buildTimerBtn(it) {
       const t = timers[it.id];
@@ -695,17 +819,19 @@
     function buildRow(it) {
       const done = isDone(it);
       const row = el("div", "dw-row" + (done ? " dw-done" : ""));
+      row.dataset.id = it.id;
       row.appendChild(checkBox(done));
       row.appendChild(el("span", "dw-row-text", it.text));
       if (it.times > 1) row.appendChild(el("span", "dw-badge", countOf(it) + "/" + it.times));
       if (it.minutes > 0 && !done) row.appendChild(buildTimerBtn(it));
-      row.title = it.text + (it.times > 1 ? "\nClick: +1, right-click: -1" : "\nClick to tick, right-click to untick");
+      row.title = it.text + (it.times > 1 ? "\nClick: +1, right-click: -1" : "\nClick to tick, right-click to untick") + "\nDrag to reorder";
       row.addEventListener("click", (e) => { e.stopPropagation(); clickItem(it); });
       row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); undoItem(it); });
       return row;
     }
 
     function renderMain() {
+      if (dragActive) { pendingRender = true; return; }
       ensureToday();
       const wd = weekday();
       const today = items.filter((it) => isScheduled(it, wd));
@@ -883,7 +1009,9 @@
 
     function buildEditRow(it) {
       const wrap = el("div", "dw-eitem" + (expandedId === it.id ? " dw-open" : ""));
+      wrap.dataset.id = it.id;
       const row = el("div", "dw-erow");
+      row.title = "Click: options, drag: reorder";
       const nameEl = el("div", "dw-erow-name", it.text);
       const metaEl = el("div", "dw-erow-meta", metaText(it));
       row.appendChild(nameEl);
@@ -907,6 +1035,7 @@
     }
 
     function renderEdit() {
+      if (dragActive) { pendingRender = true; return; }
       ensureToday();
       const sc = editList.scrollTop;
       editList.textContent = "";
@@ -948,6 +1077,8 @@
 
     // =================== EVENTS ===================
     widgetDiv.addEventListener("click", (e) => e.stopPropagation());
+    enableDragSort(listEl, ".dw-row", null);
+    enableDragSort(editList, ".dw-eitem", ".dw-erow");
     editBtn.addEventListener("click", (e) => { e.stopPropagation(); setEditing(true); });
     backBtn.addEventListener("click", (e) => { e.stopPropagation(); setEditing(false); });
     gearBtn.addEventListener("click", (e) => {
